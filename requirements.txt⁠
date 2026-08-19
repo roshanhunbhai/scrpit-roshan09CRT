@@ -2,3 +2,5 @@ moviepy
 edge-tts
 requests
 pillow
+imageio[ffmpeg]
+imageio-ffmpeg
