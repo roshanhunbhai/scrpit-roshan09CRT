@@ -1,5 +1,7 @@
-moviepy
+flask
+gunicorn
 edge-tts
+moviepy
 requests
 pillow
 imageio[ffmpeg]
