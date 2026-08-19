@@ -1,53 +1,111 @@
+import os
 import asyncio
-import edge_tts
-import requests
 import urllib.parse
-from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips
+import requests
+from flask import Flask, render_template_string, request, send_file
+import edge_tts
+from moviepy import ImageClip, AudioFileClip, concatenate_videoclips
 
-# 1. Aapki Kahani / Script
-SCRIPT_SCENES = [
-    {"text": "Ek chhote se gaon me ek udas ladka rehta tha.", "emotion": "sad cartoon boy sitting alone under a tree, Pixar style 3d render"},
-    {"text": "Achanak use ek magical sparkling khazana mila aur woh bohot khush ho gaya!", "emotion": "happy excited cartoon boy discovering a glowing treasure box, Pixar style 3d render"},
-    {"text": "Usne apne dost ke sath khushi se dance kiya.", "emotion": "two joyful cartoon friends celebrating together, colorful background, 3d animation style"}
-]
+app = Flask(__name__)
 
-VOICE = "hi-IN-SwaraNeural"  # Hindi AI Voice
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Tax Shorts Generator</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #0f172a; color: #f8fafc; margin:0; padding:20px; }
+        .card { max-width: 600px; margin: 30px auto; background: #1e293b; padding: 25px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        h2 { color: #38bdf8; text-align: center; margin-bottom: 20px; }
+        label { font-weight: 600; display: block; margin-top: 15px; color: #94a3b8; }
+        textarea, select { width: 100%; padding: 12px; margin-top: 6px; background: #0f172a; border: 1px solid #334155; border-radius: 8px; color: white; box-sizing: border-box; }
+        textarea { height: 120px; }
+        button { width: 100%; background: #0284c7; color: white; border: none; padding: 15px; margin-top: 25px; border-radius: 8px; font-weight: bold; font-size: 16px; cursor: pointer; transition: 0.3s; }
+        button:hover { background: #0369a1; }
+        .badge { background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; float: right; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>📊 AI Tax & Story Video Studio <span class="badge">40s Limit Active</span></h2>
+        <form action="/generate" method="post">
+            <label>1. Script / Tax Tips (3-4 Choti Lines Likhein):</label>
+            <textarea name="script" required placeholder="Line 1: Tax bachana chahte hain? Yeh simple tip dekhein.&#10;Line 2: Section 80C me invest karke aap 1.5 Lakh tak tax bacha sakte hain.&#10;Line 3: Aaj hi apne financial planner se baat karein!"></textarea>
 
-async def generate_voice(text, filename):
-    communicate = edge_tts.Communicate(text, VOICE)
-    await communicate.save(filename)
+            <label>2. Voice Select Karein:</label>
+            <select name="voice">
+                <option value="hi-IN-SwaraNeural">Female Voice (Swara - Hindi)</option>
+                <option value="hi-IN-MadhurNeural">Male Voice (Madhur - Hindi)</option>
+            </select>
 
-def generate_image(prompt, filename):
-    # Free AI Image Generator (Pollinations.ai)
+            <label>3. Visual Art Style:</label>
+            <select name="art_style">
+                <option value="2d cartoon explainer style character talking about money tax, clean corporate background">Tax Explainer (2D Cartoon)</option>
+                <option value="3d pixar style professional accountant explaining finance with charts">3D Pixar Finance Style</option>
+            </select>
+
+            <button type="submit">🚀 Generate 40s Video</button>
+        </form>
+    </div>
+</body>
+</html>
+"""
+
+async def text_to_speech(text, voice, output_path):
+    communicate = edge_tts.Communicate(text, voice)
+    await communicate.save(output_path)
+
+def create_image(prompt, output_path):
     encoded_prompt = urllib.parse.quote(prompt)
     url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1280&height=720&nologo=true"
-    response = requests.get(url)
-    if response.status_code == 200:
-        with open(filename, 'wb') as f:
-            f.write(response.content)
+    res = requests.get(url)
+    if res.status_code == 200:
+        with open(output_path, 'wb') as f:
+            f.write(res.content)
 
-def create_cartoon_story_video():
+@app.route('/')
+def home():
+    return render_template_string(HTML_TEMPLATE)
+
+@app.route('/generate', methods=['POST'])
+def generate():
+    script_raw = request.form.get('script', '')
+    art_style = request.form.get('art_style', '')
+    voice = request.form.get('voice', 'hi-IN-SwaraNeural')
+
+    lines = [line.strip() for line in script_raw.split('\n') if line.strip()]
+    if not lines:
+        return "Script khali hai!", 400
+
     clips = []
-    
-    for idx, scene in enumerate(SCRIPT_SCENES):
-        print(f"Processing Scene {idx+1}...")
-        
-        audio_file = f"voice_{idx}.mp3"
-        image_file = f"scene_{idx}.jpg"
-        
-        # Voiceover & Image generation
-        asyncio.run(generate_voice(scene["text"], audio_file))
-        generate_image(scene["emotion"], image_file)
-        
-        # Audio & Image merge
-        audio = AudioFileClip(audio_file)
-        image_clip = ImageClip(image_file).set_duration(audio.duration).set_audio(audio)
-        clips.append(image_clip)
-        
-    # All scenes combined into final video
-    final_video = concatenate_videoclips(clips, method="compose")
-    final_video.write_videofile("cartoon_story_video.mp4", fps=24, codec='libx264', audio_codec='aac')
-    print("Full Cartoon Video Created Successfully!")
+    total_duration = 0
+    MAX_DURATION = 45.0  # Safe limit for 40 sec short video
 
-# Run Script
-create_cartoon_story_video()
+    for idx, line in enumerate(lines):
+        if total_duration >= MAX_DURATION:
+            break
+
+        audio_path = f"audio_{idx}.mp3"
+        image_path = f"img_{idx}.jpg"
+        
+        # Audio & Image Generate
+        asyncio.run(text_to_speech(line, voice, audio_path))
+        full_prompt = f"{line}, {art_style}"
+        create_image(full_prompt, image_path)
+        
+        audio = AudioFileClip(audio_path)
+        img_clip = ImageClip(image_path).with_duration(audio.duration).with_audio(audio)
+        
+        clips.append(img_clip)
+        total_duration += audio.duration
+
+    output_video = "tax_short_video.mp4"
+    final_video = concatenate_videoclips(clips, method="compose")
+    final_video.write_videofile(output_video, fps=24, codec='libx264', audio_codec='aac')
+
+    return send_file(output_video, as_attachment=True)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=10000)
